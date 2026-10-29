@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Cyber Dig - スマホ専用マインスイーパ</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Canvas Confetti for Clear Celebrations -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+
+  <style>
+    /* モバイル向けスクロール・ズーム・誤選択防止 */
+    * {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+      box-sizing: border-box;
+    }
+    html, body {
+      height: 100%;
+      height: 100dvh;
+      overflow: hidden;
+      touch-action: manipulation;
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    /* 3D立体セル・掘削感のあるデザイン */
+    .cell {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: transform 0.08s ease, background-color 0.12s ease, box-shadow 0.08s ease;
+      box-shadow: 0 3px 0 #1e293b, 0 4px 6px rgba(0,0,0,0.3);
+    }
+    .cell:active:not(.revealed) {
+      transform: translateY(2px);
+      box-shadow: 0 1px 0 #1e293b, 0 1px 2px rgba(0,0,0,0.4);
+    }
+
+    /* 未開封のマス */
+    .cell-unrevealed {
+      background: linear-gradient(145deg, #334155, #1e293b);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    /* 開封済みのマス */
+    .cell-revealed {
+      background: #090d16;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.6);
+      transform: none !important;
+    }
+
+    /* ヒントで開かれた時のハイライト */
+    @keyframes hintPulse {
+      0% { transform: scale(0.85); box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.9); }
+      50% { transform: scale(1.1); box-shadow: 0 0 20px 6px rgba(56, 189, 248, 0.8); }
+      100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
+    }
+    .cell-hint-reveal {
+      animation: hintPulse 0.6s ease-out;
+      border: 2px solid #38bdf8 !important;
+    }
+
+    /* 地雷爆発アニメーション */
+    @keyframes shake {
+      0%, 100% { transform: translate(0, 0); }
+      20% { transform: translate(-4px, 4px); }
+      40% { transform: translate(4px, -4px); }
+      60% { transform: translate(-3px, -3px); }
+      80% { transform: translate(3px, 2px); }
+    }
+    .shake-screen {
+      animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
+    }
+
+    /* 数字色（クラシックかつサイバーな発色） */
+    .num-1 { color: #38bdf8; text-shadow: 0 0 8px rgba(56,189,248,0.4); }
+    .num-2 { color: #4ade80; text-shadow: 0 0 8px rgba(74,222,128,0.4); }
+    .num-3 { color: #f87171; text-shadow: 0 0 8px rgba(248,113,113,0.4); }
+    .num-4 { color: #c084fc; text-shadow: 0 0 8px rgba(192,132,252,0.4); }
+    .num-5 { color: #fbbf24; text-shadow: 0 0 8px rgba(251,191,36,0.4); }
+    .num-6 { color: #2dd4bf; text-shadow: 0 0 8px rgba(45,212,191,0.4); }
+    .num-7 { color: #f472b6; }
+    .num-8 { color: #94a3b8; }
+  </style>
+</head>
+<body class="flex flex-col h-full w-full justify-between select-none antialiased bg-slate-950 px-3 pt-safe pb-safe">
+
+  <!-- ==================== HEADER INFO BAR ==================== -->
+  <header class="w-full max-w-md mx-auto pt-2 pb-1 shrink-0">
+    <div class="flex items-center justify-between bg-slate-900/90 border border-slate-800/80 rounded-2xl px-3.5 py-2 shadow-lg backdrop-blur-md">
+      
+      <!-- タイマー（左上指定） -->
+      <div class="flex items-center gap-1.5 min-w-[76px]">
+        <i data-lucide="timer" class="w-4 h-4 text-emerald-400"></i>
+        <span id="timer-display" class="font-mono text-lg font-black tracking-wider text-emerald-400">00:00</span>
+      </div>
+
+      <!-- 中央：ステータス顔アイコン & 残り安全マス進捗 -->
+      <div class="flex flex-col items-center">
+        <button id="face-btn" class="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700/80 flex items-center justify-center text-xl transition shadow-inner">
+          <span id="face-emoji">⛏️</span>
+        </button>
+        <span id="safe-left-text" class="text-[10px] text-slate-400 font-medium mt-0.5 tracking-tight">残り 198</span>
+      </div>
+
+      <!-- 右側：地雷数 & 設定ボタン -->
+      <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1 px-2 py-1 bg-red-950/40 border border-red-900/50 rounded-lg">
+          <i data-lucide="bomb" class="w-4 h-4 text-rose-500"></i>
+          <span id="mines-display" class="font-mono text-base font-bold text-rose-400">42</span>
+        </div>
+        <button id="settings-btn" class="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 active:scale-95 transition" aria-label="設定">
+          <i data-lucide="settings" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ==================== MAIN GAME BOARD CONTAINER ==================== -->
+  <main id="board-container" class="w-full max-w-md mx-auto flex-1 flex items-center justify-center p-1 relative overflow-hidden">
+    <!-- グリッド盤面（JSで動的にスタイル＆セル生成） -->
+    <div id="minefield" class="w-full h-full grid gap-1 p-1 bg-slate-900/60 rounded-2xl border border-slate-800/60 shadow-2xl backdrop-blur-sm">
+      <!-- セルがここに挿入されます -->
+    </div>
+  </main>
+
+  <!-- ==================== FOOTER CONTROL BAR ==================== -->
+  <footer class="w-full max-w-md mx-auto pb-3 pt-1 shrink-0">
+    <div class="flex items-center gap-2.5">
+      
+      <!-- お助けボタン（スマートヒント） -->
+      <button id="hint-btn" class="relative flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-sky-600 via-cyan-500 to-blue-600 active:from-sky-700 active:to-blue-700 text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-sky-900/40 border border-sky-400/30 transition transform active:scale-[0.98]">
+        <i data-lucide="sparkles" class="w-5 h-5 animate-pulse text-amber-200"></i>
+        <span class="text-sm tracking-wide">お助け開け</span>
+        <!-- 残り回数バッジ -->
+        <span id="hint-badge" class="ml-1 px-2 py-0.5 rounded-full bg-slate-900/80 text-sky-300 text-xs font-mono font-black border border-sky-400/40">
+          3回
+        </span>
+      </button>
+
+      <!-- リトライ / やり直しボタン -->
+      <button id="restart-btn" class="py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 font-bold border border-slate-700/80 shadow-md flex items-center justify-center gap-1.5 transition">
+        <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+        <span class="text-xs">リセット</span>
+      </button>
+
+    </div>
+  </footer>
+
+  <!-- ==================== CLEAR MODAL ==================== -->
+  <div id="clear-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-300">
+    <div class="bg-gradient-to-b from-slate-900 to-slate-950 border border-emerald-500/40 p-6 rounded-3xl max-w-xs w-full text-center shadow-2xl shadow-emerald-950/50 transform scale-95 transition-transform duration-300" id="clear-modal-card">
+      <div class="w-16 h-16 mx-auto mb-3 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-3xl">
+        🎉
+      </div>
+      <h2 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-200 mb-1">CLEAR!</h2>
+      <p class="text-xs text-slate-400 mb-4">すべての安全なマスを掘り終えました！</p>
+      
+      <div class="bg-slate-800/60 rounded-xl p-3 mb-5 border border-slate-700/60 flex justify-around">
+        <div>
+          <span class="block text-[10px] text-slate-400 uppercase tracking-wider font-semibold">クリアタイム</span>
+          <span id="modal-clear-time" class="text-xl font-mono font-bold text-emerald-400">00:00</span>
+        </div>
+        <div class="border-l border-slate-700/80"></div>
+        <div>
+          <span class="block text-[10px] text-slate-400 uppercase tracking-wider font-semibold">使用お助け</span>
+          <span id="modal-hints-used" class="text-xl font-mono font-bold text-sky-400">0回</span>
+        </div>
+      </div>
+
+      <button id="modal-next-btn" class="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold shadow-lg shadow-emerald-900/40 transition active:scale-95 flex items-center justify-center gap-2">
+        <i data-lucide="play" class="w-4 h-4 fill-white"></i>
+        <span>次の盤面へ</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ==================== GAME OVER MODAL ==================== -->
+  <div id="over-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-300">
+    <div class="bg-gradient-to-b from-slate-900 to-slate-950 border border-rose-500/40 p-6 rounded-3xl max-w-xs w-full text-center shadow-2xl shadow-rose-950/50 transform scale-95 transition-transform duration-300" id="over-modal-card">
+      <div class="w-16 h-16 mx-auto mb-3 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-3xl">
+        💥
+      </div>
+      <h2 class="text-2xl font-black text-rose-500 mb-1">GAME OVER</h2>
+      <p class="text-xs text-slate-400 mb-4">地雷を掘り当ててしまいました…</p>
+      
+      <button id="modal-retry-btn" class="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-700 hover:to-red-700 text-white font-bold shadow-lg shadow-rose-900/40 transition active:scale-95 flex items-center justify-center gap-2">
+        <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+        <span>もう一度挑戦</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ==================== SETTINGS MODAL ==================== -->
+  <div id="settings-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-200">
+    <div class="bg-slate-900 border border-slate-700/80 p-5 rounded-3xl max-w-xs w-full shadow-2xl">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <i data-lucide="sliders" class="w-4 h-4 text-sky-400"></i>
+          <span>設定</span>
+        </h3>
+        <button id="close-settings-btn" class="p-1 rounded-lg text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- 難易度（サイズ・地雷数） -->
+      <div class="mb-4">
+        <label class="block text-xs font-semibold text-slate-400 mb-2">盤面サイズ & 難易度</label>
+        <div class="grid grid-cols-3 gap-1.5" id="diff-buttons">
+          <button data-diff="mild" class="diff-btn py-2 px-1 rounded-xl bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-300">
+            マイルド<br><span class="text-[10px] text-slate-400 font-normal">10×16 (24個)</span>
+          </button>
+          <button data-diff="standard" class="diff-btn py-2 px-1 rounded-xl bg-sky-600/30 border border-sky-400 text-xs font-bold text-sky-300">
+            おすすめ<br><span class="text-[10px] text-sky-200/80 font-normal">12×20 (42個)</span>
+          </button>
+          <button data-diff="hard" class="diff-btn py-2 px-1 rounded-xl bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-300">
+            ハード<br><span class="text-[10px] text-slate-400 font-normal">14×24 (62個)</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- お助け回数設定（1回、3回、5回） -->
+      <div class="mb-5">
+        <label class="block text-xs font-semibold text-slate-400 mb-2">1面のお助け回数</label>
+        <div class="grid grid-cols-3 gap-2" id="hint-count-buttons">
+          <button data-hints="1" class="hint-cnt-btn py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-slate-300">1 回</button>
+          <button data-hints="3" class="hint-cnt-btn py-2 rounded-xl bg-sky-600/30 border border-sky-400 text-xs font-bold text-sky-300">3 回</button>
+          <button data-hints="5" class="hint-cnt-btn py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-slate-300">5 回</button>
+        </div>
+      </div>
+
+      <!-- サウンド ON/OFF -->
+      <div class="flex items-center justify-between mb-5 px-1">
+        <span class="text-xs font-semibold text-slate-300 flex items-center gap-2">
+          <i data-lucide="volume-2" class="w-4 h-4 text-emerald-400"></i>
+          サウンド効果
+        </span>
+        <label class="relative inline-flex items-center cursor-pointer">
+          <input type="checkbox" id="sound-toggle" checked class="sr-only peer">
+          <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+        </label>
+      </div>
+
+      <button id="save-settings-btn" class="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm transition">
+        完了
+      </button>
+    </div>
+  </div>
+
+  <!-- ==================== JAVASCRIPT GAME LOGIC ==================== -->
+  <script>
+    // --- Web Audio API によるシンセ音（外部ファイルなし） ---
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+      }
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AudioContext();
+        }
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+      playDig() {
+        if (!this.enabled) return;
+        this.init();
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(320, now);
+        osc.frequency.exponentialRampToValueAtTime(80, now + 0.08);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.08);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.08);
+      }
+      playCascade() {
+        if (!this.enabled) return;
+        this.init();
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.exponentialRampToValueAtTime(880, now + 0.12);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.12);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.12);
+      }
+      playHint() {
+        if (!this.enabled) return;
+        this.init();
+        const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+        notes.forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          const start = this.ctx.currentTime + (idx * 0.06);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, start);
+          gain.gain.setValueAtTime(0.15, start);
+          gain.gain.exponentialRampToValueAtTime(0.001, start + 0.2);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(start);
+          osc.stop(start + 0.2);
+        });
+      }
+      playExplosion() {
+        if (!this.enabled) return;
+        this.init();
+        const now = this.ctx.currentTime;
+        const bufferSize = this.ctx.sampleRate * 0.5;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const output = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
+        }
+        const whiteNoise = this.ctx.createBufferSource();
+        whiteNoise.buffer = buffer;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(800, now);
+        filter.frequency.linearRampToValueAtTime(50, now + 0.45);
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.5, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
+        whiteNoise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        whiteNoise.start(now);
+      }
+      playWin() {
+        if (!this.enabled) return;
+        this.init();
+        const chords = [523.25, 659.25, 783.99, 1046.50, 1318.51];
+        chords.forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          const start = this.ctx.currentTime + (idx * 0.08);
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, start);
+          gain.gain.setValueAtTime(0.2, start);
+          gain.gain.exponentialRampToValueAtTime(0.001, start + 0.45);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(start);
+          osc.stop(start + 0.45);
+        });
+      }
+    }
+
+    const sound = new SoundEngine();
+
+    // --- 難易度プリセット ---
+    const PRESETS = {
+      mild: { cols: 10, rows: 16, mines: 24, name: 'マイルド' },
+      standard: { cols: 12, rows: 20, mines: 42, name: 'おすすめ (中級-上級間)' },
+      hard: { cols: 14, rows: 24, mines: 62, name: 'ハード' }
+    };
+
+    // --- ゲーム設定・状態 ---
+    let currentDiff = 'standard';
+    let maxHints = 3;
+    let hintsRemaining = 3;
+    let hintsUsedInRound = 0;
+
+    let cols = PRESETS[currentDiff].cols;
+    let rows = PRESETS[currentDiff].rows;
+    let mineCount = PRESETS[currentDiff].mines;
+
+    let grid = []; // 2D array: { mine: bool, revealed: bool, count: number }
+    let gameState = 'ready'; // 'ready', 'playing', 'won', 'lost'
+    let firstClick = true;
+    let timerInterval = null;
+    let elapsedSeconds = 0;
+    let safeRemaining = 0;
+
+    // DOM 要素
+    const minefieldEl = document.getElementById('minefield');
+    const timerDisplay = document.getElementById('timer-display');
+    const minesDisplay = document.getElementById('mines-display');
+    const safeLeftText = document.getElementById('safe-left-text');
+    const faceEmoji = document.getElementById('face-emoji');
+    const faceBtn = document.getElementById('face-btn');
+    const hintBtn = document.getElementById('hint-btn');
+    const hintBadge = document.getElementById('hint-badge');
+    const restartBtn = document.getElementById('restart-btn');
+
+    // モーダル要素
+    const clearModal = document.getElementById('clear-modal');
+    const clearModalCard = document.getElementById('clear-modal-card');
+    const modalClearTime = document.getElementById('modal-clear-time');
+    const modalHintsUsed = document.getElementById('modal-hints-used');
+    const modalNextBtn = document.getElementById('modal-next-btn');
+
+    const overModal = document.getElementById('over-modal');
+    const overModalCard = document.getElementById('over-modal-card');
+    const modalRetryBtn = document.getElementById('modal-retry-btn');
+
+    const settingsModal = document.getElementById('settings-modal');
+    const settingsBtn = document.getElementById('settings-btn');
+    const closeSettingsBtn = document.getElementById('close-settings-btn');
+    const saveSettingsBtn = document.getElementById('save-settings-btn');
+    const soundToggle = document.getElementById('sound-toggle');
+
+    // --- タイマー制御 ---
+    function formatTime(sec) {
+      const m = Math.floor(sec / 60).toString().padStart(2, '0');
+      const s = (sec % 60).toString().padStart(2, '0');
+      return `${m}:${s}`;
+    }
+
+    function startTimer() {
+      if (timerInterval) clearInterval(timerInterval);
+      elapsedSeconds = 0;
+      timerDisplay.textContent = '00:00';
+      timerInterval = setInterval(() => {
+        elapsedSeconds++;
+        if (elapsedSeconds > 5999) elapsedSeconds = 5999;
+        timerDisplay.textContent = formatTime(elapsedSeconds);
+      }, 1000);
+    }
+
+    function stopTimer() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+    }
+
+    // --- 盤面初期化 ---
+    function initGame() {
+      stopTimer();
+      elapsedSeconds = 0;
+      timerDisplay.textContent = '00:00';
+      firstClick = true;
+      gameState = 'ready';
+      hintsRemaining = maxHints;
+      hintsUsedInRound = 0;
+      updateHintUI();
+
+      cols = PRESETS[currentDiff].cols;
+      rows = PRESETS[currentDiff].rows;
+      mineCount = PRESETS[currentDiff].mines;
+
+      minesDisplay.textContent = mineCount;
+      faceEmoji.textContent = '⛏️';
+
+      const totalCells = cols * rows;
+      safeRemaining = totalCells - mineCount;
+      safeLeftText.textContent = `残り ${safeRemaining}`;
+
+      // グリッド配列生成
+      grid = [];
+      for (let r = 0; r < rows; r++) {
+        const row = [];
+        for (let c = 0; c < cols; c++) {
+          row.push({
+            r,
+            c,
+            mine: false,
+            revealed: false,
+            count: 0
+          });
+        }
+        grid.push(row);
+      }
+
+      renderBoard();
+      closeAllModals();
+    }
+
+    // --- 盤面のDOM描画 ---
+    function renderBoard() {
+      minefieldEl.innerHTML = '';
+      minefieldEl.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+      minefieldEl.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+
+      // 画面のセルフォントサイズを自動計算
+      const fontSize = Math.max(10, Math.floor(280 / cols));
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const cellEl = document.createElement('div');
+          cellEl.className = 'cell cell-unrevealed text-slate-100';
+          cellEl.style.fontSize = `${fontSize}px`;
+          cellEl.id = `cell-${r}-${c}`;
+          
+          // タップ操作
+          cellEl.addEventListener('click', (e) => {
+            e.preventDefault();
+            handleCellTap(r, c);
+          });
+
+          minefieldEl.appendChild(cellEl);
+        }
+      }
+    }
+
+    // --- 初回タップ時の地雷生成（100%安全かつ周囲0の空き地を保証） ---
+    function generateMines(safeR, safeC) {
+      let placed = 0;
+      // 最初のタップ位置とその周囲8マスは地雷を配置しない
+      const forbidden = new Set();
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const nr = safeR + dr;
+          const nc = safeC + dc;
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+            forbidden.add(`${nr},${nc}`);
+          }
+        }
+      }
+
+      while (placed < mineCount) {
+        const r = Math.floor(Math.random() * rows);
+        const c = Math.floor(Math.random() * cols);
+        const key = `${r},${c}`;
+        if (!grid[r][c].mine && !forbidden.has(key)) {
+          grid[r][c].mine = true;
+          placed++;
+        }
+      }
+
+      // 隣接地雷数の計算
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (!grid[r][c].mine) {
+            let count = 0;
+            for (let dr = -1; dr <= 1; dr++) {
+              for (let dc = -1; dc <= 1; dc++) {
+                const nr = r + dr;
+                const nc = c + dc;
+                if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+                  if (grid[nr][nc].mine) count++;
+                }
+              }
+            }
+            grid[r][c].count = count;
+          }
+        }
+      }
+    }
+
+    // --- セルタップ処理 ---
+    function handleCellTap(r, c) {
+      if (gameState === 'lost' || gameState === 'won') return;
+      const cell = grid[r][c];
+      if (cell.revealed) return;
+
+      if (firstClick) {
+        firstClick = false;
+        gameState = 'playing';
+        startTimer();
+        generateMines(r, c);
+      }
+
+      if (cell.mine) {
+        // 地雷を踏んだ
+        triggerGameOver(r, c);
+      } else {
+        // 安全なマス
+        sound.playDig();
+        revealCell(r, c);
+        checkWinCondition();
+      }
+    }
+
+    // --- マスを開封（連鎖空き地オープン含む） ---
+    function revealCell(startR, startC) {
+      const queue = [[startR, startC]];
+      let openedCount = 0;
+
+      while (queue.length > 0) {
+        const [r, c] = queue.shift();
+        const cell = grid[r][c];
+
+        if (cell.revealed || cell.mine) continue;
+
+        cell.revealed = true;
+        safeRemaining--;
+        openedCount++;
+
+        const el = document.getElementById(`cell-${r}-${c}`);
+        if (el) {
+          el.className = 'cell cell-revealed';
+          if (cell.count > 0) {
+            el.textContent = cell.count;
+            el.classList.add(`num-${cell.count}`);
+          } else {
+            el.textContent = '';
+          }
+        }
+
+        // 0なら周囲8マスを連鎖展開
+        if (cell.count === 0) {
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              const nr = r + dr;
+              const nc = c + dc;
+              if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+                if (!grid[nr][nc].revealed && !grid[nr][nc].mine) {
+                  queue.push([nr, nc]);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (openedCount > 3) {
+        sound.playCascade();
+      }
+      safeLeftText.textContent = `残り ${Math.max(0, safeRemaining)}`;
+    }
+
+    // --- お助け（ヒント）ボタン機能 ---
+    function useHint() {
+      if (gameState === 'lost' || gameState === 'won') return;
+      if (hintsRemaining <= 0) return;
+
+      // 初手の場合は中央付近を開封してゲームスタート
+      if (firstClick) {
+        const midR = Math.floor(rows / 2);
+        const midC = Math.floor(cols / 2);
+        handleCellTap(midR, midC);
+        hintsRemaining--;
+        hintsUsedInRound++;
+        updateHintUI();
+        sound.playHint();
+        return;
+      }
+
+      // 1. 論理的に安全と分かるマスを探す（周辺の数字マスから推論）
+      const logicallySafe = findLogicallySafeCell();
+      let targetCell = logicallySafe;
+
+      // 2. 確定安全マスがなければ、残りの未開封かつ地雷でないマスからランダムに選定
+      if (!targetCell) {
+        const unrevealedSafe = [];
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            if (!grid[r][c].revealed && !grid[r][c].mine) {
+              unrevealedSafe.push(grid[r][c]);
+            }
+          }
+        }
+        if (unrevealedSafe.length === 0) return;
+        targetCell = unrevealedSafe[Math.floor(Math.random() * unrevealedSafe.length)];
+      }
+
+      hintsRemaining--;
+      hintsUsedInRound++;
+      updateHintUI();
+      sound.playHint();
+
+      // ハイライトアニメーション後に開封
+      const el = document.getElementById(`cell-${targetCell.r}-${targetCell.c}`);
+      if (el) {
+        el.classList.add('cell-hint-reveal');
+        setTimeout(() => {
+          revealCell(targetCell.r, targetCell.c);
+          checkWinCondition();
+        }, 220);
+      }
+    }
+
+    // 確定安全マスの探査ロジック
+    function findLogicallySafeCell() {
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const cell = grid[r][c];
+          if (!cell.revealed || cell.count === 0) continue;
+
+          // 周囲の未開封マスと地雷フラグの状況を確認
+          let unrevealedNeighbors = [];
+          let mineNeighbors = 0;
+
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              const nr = r + dr;
+              const nc = c + dc;
+              if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+                if (!grid[nr][nc].revealed) {
+                  unrevealedNeighbors.push(grid[nr][nc]);
+                  if (grid[nr][nc].mine) mineNeighbors++;
+                }
+              }
+            }
+          }
+
+          // 周囲の未開封マスが全て地雷であることが確定している場合、他マスへの推論が可能だが
+          // 逆に「数字の数だけ地雷がすでに周囲に確定している」場合、他の未開封マスは確実に安全
+          if (mineNeighbors === cell.count && unrevealedNeighbors.length > mineNeighbors) {
+            const safeOne = unrevealedNeighbors.find(c => !c.mine);
+            if (safeOne) return safeOne;
+          }
+        }
+      }
+      return null;
+    }
+
+    function updateHintUI() {
+      hintBadge.textContent = `${hintsRemaining}回`;
+      if (hintsRemaining <= 0 || gameState === 'lost' || gameState === 'won') {
+        hintBtn.disabled = true;
+        hintBtn.classList.add('opacity-50', 'cursor-not-allowed', 'filter', 'grayscale');
+      } else {
+        hintBtn.disabled = false;
+        hintBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'filter', 'grayscale');
+      }
+    }
+
+    // --- ゲームクリア判定 ---
+    function checkWinCondition() {
+      if (safeRemaining <= 0 && gameState !== 'lost') {
+        gameState = 'won';
+        stopTimer();
+        faceEmoji.textContent = '😎';
+        sound.playWin();
+
+        // 紙吹雪パーティクル
+        confetti({
+          particleCount: 120,
+          spread: 70,
+          origin: { y: 0.6 }
+        });
+
+        // モーダル表示
+        modalClearTime.textContent = formatTime(elapsedSeconds);
+        modalHintsUsed.textContent = `${hintsUsedInRound}回`;
+
+        setTimeout(() => {
+          clearModal.classList.remove('opacity-0', 'pointer-events-none');
+          clearModalCard.classList.remove('scale-95');
+          clearModalCard.classList.add('scale-100');
+        }, 500);
+
+        updateHintUI();
+      }
+    }
+
+    // --- ゲームオーバー演出 ---
+    function triggerGameOver(hitR, hitC) {
+      gameState = 'lost';
+      stopTimer();
+      faceEmoji.textContent = '😵';
+      sound.playExplosion();
+
+      // 画面シェイク
+      document.body.classList.add('shake-screen');
+      setTimeout(() => document.body.classList.remove('shake-screen'), 450);
+
+      // 全地雷の開示（踏んだ地雷から順に連鎖エフェクト）
+      const mines = [];
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (grid[r][c].mine) {
+            const dist = Math.hypot(r - hitR, c - hitC);
+            mines.push({ r, c, dist, isHit: (r === hitR && c === hitC) });
+          }
+        }
+      }
+
+      // 距離順にソートして波及爆発
+      mines.sort((a, b) => a.dist - b.dist);
+
+      mines.forEach((m, idx) => {
+        setTimeout(() => {
+          const el = document.getElementById(`cell-${m.r}-${m.c}`);
+          if (el) {
+            el.className = 'cell cell-revealed';
+            if (m.isHit) {
+              el.style.background = '#dc2626';
+              el.style.borderColor = '#f87171';
+              el.innerHTML = '<span class="text-white text-base">💥</span>';
+            } else {
+              el.style.background = '#450a0a';
+              el.innerHTML = '<span class="text-rose-400 text-sm">💣</span>';
+            }
+          }
+        }, idx * 25);
+      });
+
+      updateHintUI();
+
+      setTimeout(() => {
+        overModal.classList.remove('opacity-0', 'pointer-events-none');
+        overModalCard.classList.remove('scale-95');
+        overModalCard.classList.add('scale-100');
+      }, Math.min(1200, mines.length * 25 + 400));
+    }
+
+    function closeAllModals() {
+      clearModal.classList.add('opacity-0', 'pointer-events-none');
+      clearModalCard.classList.remove('scale-100');
+      clearModalCard.classList.add('scale-95');
+
+      overModal.classList.add('opacity-0', 'pointer-events-none');
+      overModalCard.classList.remove('scale-100');
+      overModalCard.classList.add('scale-95');
+
+      settingsModal.classList.add('opacity-0', 'pointer-events-none');
+    }
+
+    // --- イベントリスナー登録 ---
+    hintBtn.addEventListener('click', useHint);
+    restartBtn.addEventListener('click', initGame);
+    faceBtn.addEventListener('click', initGame);
+    modalNextBtn.addEventListener('click', initGame);
+    modalRetryBtn.addEventListener('click', initGame);
+
+    // 設定モーダル制御
+    settingsBtn.addEventListener('click', () => {
+      settingsModal.classList.remove('opacity-0', 'pointer-events-none');
+    });
+    closeSettingsBtn.addEventListener('click', () => {
+      settingsModal.classList.add('opacity-0', 'pointer-events-none');
+    });
+    saveSettingsBtn.addEventListener('click', () => {
+      settingsModal.classList.add('opacity-0', 'pointer-events-none');
+      initGame();
+    });
+
+    // 難易度切り替えボタン
+    document.querySelectorAll('.diff-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.diff-btn').forEach(b => {
+          b.className = 'diff-btn py-2 px-1 rounded-xl bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-300';
+        });
+        btn.className = 'diff-btn py-2 px-1 rounded-xl bg-sky-600/30 border border-sky-400 text-xs font-bold text-sky-300';
+        currentDiff = btn.dataset.diff;
+      });
+    });
+
+    // お助け回数切り替えボタン（1, 3, 5）
+    document.querySelectorAll('.hint-cnt-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.hint-cnt-btn').forEach(b => {
+          b.className = 'hint-cnt-btn py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-slate-300';
+        });
+        btn.className = 'hint-cnt-btn py-2 rounded-xl bg-sky-600/30 border border-sky-400 text-xs font-bold text-sky-300';
+        maxHints = parseInt(btn.dataset.hints, 10);
+      });
+    });
+
+    // サウンドトグル
+    soundToggle.addEventListener('change', (e) => {
+      sound.enabled = e.target.checked;
+    });
+
+    // アイコンの初期化
+    window.addEventListener('load', () => {
+      if (window.lucide) {
+        lucide.createIcons();
+      }
+      initGame();
+    });
+  </script>
+</body>
+</html>
